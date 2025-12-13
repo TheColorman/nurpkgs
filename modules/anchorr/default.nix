@@ -24,8 +24,8 @@
         package = mkPackageOption pkgs.nur.repos.colorman "anchorr" {};
 
         settings = mkOption {
-          type = types.attrs;
-          default = {};
+          type = with types; nullOr attrs;
+          default = null;
           example = {
             JELLYFIN_BASE_URL = "http://localhost:8096";
           };
@@ -85,6 +85,16 @@ in {
 
       jsonConfigFile = pkgs.writers.writeJSON "config.json" instance.settings;
 
+      publicConfigSegment =
+        lib.optionalString (instance.settings != null)
+        ''
+          const settings_json = "${jsonConfigFile}";
+          Object.assign(
+            loaded_settings,
+            JSON.parse(fs.readFileSync(settings_json, "utf8"))
+          );
+        '';
+
       secretConfigSegment =
         lib.optionalString (instance.settingsFile != null)
         ''
@@ -104,12 +114,9 @@ in {
 
         "use strict";
         const fs = require("fs");
-        const settings_json = "${jsonConfigFile}";
         let loaded_settings = {};
-        Object.assign(
-          loaded_settings,
-          JSON.parse(fs.readFileSync(settings_json, "utf8"))
-        );
+
+        ${publicConfigSegment}
         ${secretConfigSegment}
 
         fs.writeFileSync(
@@ -121,10 +128,13 @@ in {
       description = "Anchorr, ${instance.name} instance";
       wantedBy = ["multi-user.target"];
       after = ["network.target"];
-      preStart = ''
-        mkdir -p '${statePath}/config'
-        ${generateJsonConfig}
-      '';
+      preStart =
+        lib.optionalString (
+          instance.settings != null || instance.settingsFile != null
+        ) ''
+          mkdir -p '${statePath}/config'
+          ${generateJsonConfig}
+        '';
 
       serviceConfig = {
         Type = "simple";
